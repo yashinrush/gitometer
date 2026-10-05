@@ -56,6 +56,10 @@ export const OmniDashboard: React.FC<OmniDashboardProps> = ({
   setActiveTab,
   isDark,
 }) => {
+  const inferredStack = reverseResult?.inferredStack || [];
+  const vibePrompt = reverseResult?.vibePrompt || '';
+  const prdSpec = reverseResult?.prdSpec || '';
+
   const [copiedDigest, setCopiedDigest] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [activeWordmark, setActiveWordmark] = useState<string>(
@@ -99,7 +103,7 @@ export const OmniDashboard: React.FC<OmniDashboardProps> = ({
 
   const handleCopyPrompt = async () => {
     try {
-      await navigator.clipboard.writeText(reverseResult.vibePrompt);
+      await navigator.clipboard.writeText(vibePrompt);
       setCopiedPrompt(true);
       setTimeout(() => setCopiedPrompt(false), 2000);
     } catch {}
@@ -274,7 +278,7 @@ export const OmniDashboard: React.FC<OmniDashboardProps> = ({
                 </div>
               </div>
               <span className="text-xs font-mono font-bold px-2 py-0.5 rounded border border-black bg-[hsl(var(--neo-panel-muted))] text-pink-200 shadow-[1px_1px_0_#000]">
-                {reverseResult.inferredStack.length} techs
+                {inferredStack.length} techs
               </span>
             </div>
 
@@ -284,17 +288,17 @@ export const OmniDashboard: React.FC<OmniDashboardProps> = ({
 
             {/* Prompt Preview */}
             <div className="p-3 rounded-md border-2 border-black bg-[#0c0917] text-purple-200 font-mono text-[11px] h-44 overflow-y-auto leading-relaxed select-text shadow-[2px_2px_0_#000]">
-              <pre className="whitespace-pre-wrap">{reverseResult.vibePrompt.slice(0, 480)}...</pre>
+              <pre className="whitespace-pre-wrap">{vibePrompt.slice(0, 480)}...</pre>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-zinc-300">
-              {reverseResult.inferredStack.slice(0, 3).map((tech: string) => (
+              {inferredStack.slice(0, 3).map((tech: string) => (
                 <span key={tech} className="px-2 py-0.5 rounded border border-black bg-[hsl(var(--neo-panel-muted))] text-[10px] text-white">
                   {tech}
                 </span>
               ))}
-              {reverseResult.inferredStack.length > 3 && (
-                <span className="text-[10px] text-zinc-400">+{reverseResult.inferredStack.length - 3}</span>
+              {inferredStack.length > 3 && (
+                <span className="text-[10px] text-zinc-400">+{inferredStack.length - 3}</span>
               )}
             </div>
           </div>
@@ -486,7 +490,7 @@ export const OmniDashboard: React.FC<OmniDashboardProps> = ({
                     Reverse-engineers complete software architecture contracts, tech stacks, and step-by-step vibe-coding agent prompts for Cursor, Claude Code, and Windsurf.
                   </p>
                   <div className="flex items-center gap-4 text-xs font-mono text-zinc-300 pt-2 border-t border-purple-900/30">
-                    <div>Stack: <strong className="text-white">{reverseResult.inferredStack.slice(0, 3).join(', ')}</strong></div>
+                    <div>Stack: <strong className="text-white">{inferredStack.slice(0, 3).join(', ')}</strong></div>
                     <div>Target: <strong className="text-white">Autonomous Agents</strong></div>
                   </div>
                   <button
@@ -662,10 +666,10 @@ export const OmniDashboard: React.FC<OmniDashboardProps> = ({
           <div className="w-full md:w-96 rounded-lg border-2 border-black bg-[#0c0917] p-4 shadow-[4px_4px_0_#000] text-purple-200 font-mono text-xs space-y-2">
             <div className="flex items-center justify-between pb-2 border-b border-neutral-800 text-[11px] text-zinc-400">
               <span className="font-bold text-pink-300">Reverse PRD Spec</span>
-              <span>{reverseResult.inferredStack.join(', ')}</span>
+              <span>{inferredStack.join(', ')}</span>
             </div>
             <div className="h-48 overflow-y-auto leading-relaxed select-text text-[11px]">
-              <pre className="whitespace-pre-wrap">{reverseResult.prdSpec.slice(0, 600)}...</pre>
+              <pre className="whitespace-pre-wrap">{prdSpec.slice(0, 600)}...</pre>
             </div>
             <div className="pt-2 text-[10px] text-zinc-400 text-right">
               Ready for Agentic Scaffolding

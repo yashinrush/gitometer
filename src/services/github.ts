@@ -34,6 +34,29 @@ export function parseRepoInput(input: string): ParsedRepoInput | null {
           }
         }
         return { owner, repo, branch, subpath };
+      } else if (parts.length === 1 && parts[0]) {
+        const term = parts[0].toLowerCase();
+        if (term === 'rushclaw' || term === 'rushclaw.ai') {
+          return { owner: 'yashinrush', repo: 'RushClaw.AI' };
+        }
+        if (term === 'fastapi') {
+          return { owner: 'fastapi', repo: 'fastapi' };
+        }
+        if (term === 'gitdiagram') {
+          return { owner: 'ahmedkhaleel2004', repo: 'gitdiagram' };
+        }
+        if (term === 'gitingest') {
+          return { owner: 'coderamp-labs', repo: 'gitingest' };
+        }
+        if (term === 'shadcn' || term === 'shadcn-ui') {
+          return { owner: 'shadcn-ui', repo: 'ui' };
+        }
+        if (term === 'react') {
+          return { owner: 'facebook', repo: 'react' };
+        }
+        if (term === 'tailwindcss') {
+          return { owner: 'tailwindlabs', repo: 'tailwindcss' };
+        }
       }
     } else {
       // Slug format: owner/repo or owner/repo/tree/branch

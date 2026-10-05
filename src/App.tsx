@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import type {
   ActiveTab,
   AppSettings,
@@ -38,6 +38,7 @@ import { StatsBar } from './components/StatsBar';
 import { OmniDashboard } from './components/OmniDashboard';
 import { IngestTab } from './components/IngestTab';
 import { DiagramTab } from './components/DiagramTab';
+import type { GenerationStatus } from './components/DiagramTab';
 import { ReverseTab } from './components/ReverseTab';
 import { SettingsModal } from './components/SettingsModal';
 import PatternWaves from './components/PatternWaves';
@@ -48,7 +49,9 @@ export const App: React.FC = () => {
       const saved = localStorage.getItem('gitometer_settings');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (!parsed.geminiKey) parsed.geminiKey = DEFAULT_GEMINI_API_KEY;
+        if (!parsed.geminiKey) {
+          parsed.geminiKey = DEFAULT_GEMINI_API_KEY;
+        }
         return parsed;
       }
     } catch {}
@@ -226,6 +229,36 @@ export const App: React.FC = () => {
     generateArchitectureGraph(metadata, rawTree)
   );
 
+  const [codemapGenStatus, setCodemapGenStatus] = useState<GenerationStatus>({
+    currentStage: 'complete',
+    stageIndex: 4,
+    logs: [],
+    isGenerating: false,
+    error: null,
+    isAi: false,
+  });
+
+  // Explicit regenerate handler for CodeMap tab
+  const handleRegenerateCodemap = useCallback(async () => {
+    setCodemapGenStatus({ currentStage: 'ingesting', stageIndex: 0, logs: ['Starting repository analysis\u2026'], isGenerating: true, error: null, isAi: true });
+    // Baseline immediately
+    setArchitectureGraph(generateArchitectureGraph(metadata, rawTree));
+    try {
+      setCodemapGenStatus(s => ({ ...s, currentStage: 'ranking', stageIndex: 1, logs: [...s.logs, 'Ranking source files by architectural importance\u2026'] }));
+      await new Promise(r => setTimeout(r, 400));
+      setCodemapGenStatus(s => ({ ...s, currentStage: 'analyzing', stageIndex: 2, logs: [...s.logs, 'Calling Gemini 2.5 Flash for architecture analysis\u2026'] }));
+      const aiGraph = await generateAiArchitecture(metadata, rawTree, readme, settings.geminiKey, sampleFiles);
+      setCodemapGenStatus(s => ({ ...s, currentStage: 'compiling', stageIndex: 3, logs: [...s.logs, 'Validating paths and compiling Mermaid AST\u2026'] }));
+      await new Promise(r => setTimeout(r, 300));
+      if (aiGraph && aiGraph.nodes && aiGraph.nodes.length > 0) {
+        setArchitectureGraph(aiGraph);
+      }
+      setCodemapGenStatus({ currentStage: 'complete', stageIndex: 4, logs: ['Architecture diagram ready.'], isGenerating: false, error: null, isAi: true });
+    } catch (err: any) {
+      setCodemapGenStatus(s => ({ ...s, currentStage: 'complete', stageIndex: 4, isGenerating: false, error: err?.message ?? 'AI generation failed. Using fallback diagram.' }));
+    }
+  }, [metadata, rawTree, readme, settings.geminiKey, sampleFiles]);
+
   // Reverse Prompt & Spec state (PromptForge)
   const [reverseResult, setReverseResult] = useState<ReversePromptResult>(() =>
     generateReversePrompt(metadata, rawTree, readme, targetAgent)
@@ -355,6 +388,8 @@ export const App: React.FC = () => {
             metadata={metadata}
             graph={architectureGraph}
             isDark={isDark}
+            onRegenerate={handleRegenerateCodemap}
+            generationStatus={codemapGenStatus}
           />
         )}
 
@@ -373,7 +408,7 @@ export const App: React.FC = () => {
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-semibold text-gray-700 dark:text-neutral-300">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse border border-black"></span>
-            <span>Gitometer • CodeLens • CodeMap • PromptForge</span>
+            <span>Gitometer â€¢ CodeLens â€¢ CodeMap â€¢ PromptForge</span>
           </div>
 
           <div className="flex items-center gap-4">
@@ -383,7 +418,7 @@ export const App: React.FC = () => {
             >
               API Token Settings
             </button>
-            <span>•</span>
+            <span>â€¢</span>
             <span>Developer Intelligence Platform</span>
           </div>
         </div>
@@ -401,3 +436,5 @@ export const App: React.FC = () => {
 };
 
 export default App;
+
+

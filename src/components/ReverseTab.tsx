@@ -40,11 +40,11 @@ export const ReverseTab: React.FC<ReverseTabProps> = ({
   const [userPromptModifier, setUserPromptModifier] = useState('');
 
   const baseContent =
-    mode === 'vibe'
-      ? reverseResult.vibePrompt
+    (mode === 'vibe'
+      ? reverseResult?.vibePrompt
       : mode === 'prd'
-      ? reverseResult.prdSpec
-      : reverseResult.roadmap;
+      ? reverseResult?.prdSpec
+      : reverseResult?.roadmap) || '';
 
   const displayContent = userPromptModifier
     ? `${baseContent}\n\n# User Custom Instructions:\n${userPromptModifier}`
@@ -146,7 +146,7 @@ export const ReverseTab: React.FC<ReverseTabProps> = ({
         {/* Inferred Tech Stack Badges */}
         <div className="pt-2 flex flex-wrap items-center gap-1.5 text-xs text-zinc-300 font-semibold">
           <span className="text-[11px] uppercase tracking-wide text-purple-300 font-bold mr-1">Inferred Stack:</span>
-          {reverseResult.inferredStack.map((tech: string) => (
+          {(reverseResult?.inferredStack || []).map((tech: string) => (
             <span
               key={tech}
               className="px-2 py-0.5 rounded border border-black bg-[#0c0917] text-[11px] font-bold text-white shadow-[1px_1px_0_#000]"

@@ -87,11 +87,13 @@ const CHIP_CLASS =
   "h-9 border-2 border-black bg-purple-400 px-3 text-sm font-semibold text-black hover:bg-purple-300 sm:h-10 sm:px-4 sm:text-base sm:font-medium dark:border-black dark:bg-[hsl(var(--neo-panel-muted))] dark:text-[hsl(var(--foreground))] dark:hover:bg-[hsl(var(--neo-button))] dark:hover:text-[#0d0a19] shadow-[3px_3px_0_#000] cursor-pointer rounded-md transition-all";
 
 const EXAMPLE_REPOS = [
+  { name: 'RushClaw.AI', path: 'yashinrush/RushClaw.AI' },
+  { name: 'gitdiagram', path: 'ahmedkhaleel2004/gitdiagram' },
   { name: 'fastapi', path: 'fastapi/fastapi' },
   { name: 'shadcn/ui', path: 'shadcn-ui/ui' },
+  { name: 'gitingest', path: 'coderamp-labs/gitingest' },
   { name: 'tailwindcss', path: 'tailwindlabs/tailwindcss' },
   { name: 'react', path: 'facebook/react' },
-  { name: 'uv', path: 'astral-sh/uv' },
 ];
 
 const WAVE_PRESETS: { id: 'silk' | 'ocean' | 'lines' | 'terminal' | 'mesh'; label: string }[] = [

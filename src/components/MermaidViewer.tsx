@@ -1,17 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mermaid from 'mermaid';
 import {
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
-  Copy,
-  Check,
-  Download,
-  AlertCircle,
-  Maximize2,
-  Minimize2,
-  Hand,
-  MousePointer,
+  ZoomIn, ZoomOut, RotateCcw, Copy, Check, Download, Maximize2,
+  Minimize2, MousePointer, Hand, AlertCircle, Minus, Plus, ScanSearch
 } from 'lucide-react';
 
 interface MermaidViewerProps {
@@ -20,139 +11,166 @@ interface MermaidViewerProps {
   onNodeClick?: (nodeId: string) => void;
 }
 
+let mermaidInitialized = false;
+
 export const MermaidViewer: React.FC<MermaidViewerProps> = ({
   mermaidCode,
   isDark = true,
   onNodeClick,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
+  const svgWrapperRef = useRef<HTMLDivElement>(null);
 
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [panMode, setPanMode] = useState(true);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [svgHtml, setSvgHtml] = useState<string>('');
+  const [isRendering, setIsRendering] = useState(false);
 
-  // Initialize Mermaid with high-contrast, modern developer theme
+  // Initialize Mermaid with GitDiagram Theme Variables
   useEffect(() => {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      themeVariables: {
-        darkMode: true,
-        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-        fontSize: '13px',
-        primaryColor: '#1a1338',
-        primaryBorderColor: '#A855F7',
-        primaryTextColor: '#F4F4F5',
-        lineColor: '#C084FC',
-        secondaryColor: '#261b4d',
-        tertiaryColor: '#342468',
-        background: '#070512',
-      },
-      flowchart: {
-        curve: 'basis',
-        htmlLabels: true,
-        useMaxWidth: false,
-      },
-      securityLevel: 'loose',
-    });
+    if (!mermaidInitialized) {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: {
+          darkMode: true,
+          fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+          fontSize: '13px',
+          primaryColor: '#1a1338',
+          primaryBorderColor: '#A855F7',
+          primaryTextColor: '#F4F4F5',
+          lineColor: '#C084FC',
+          secondaryColor: '#261b4d',
+          tertiaryColor: '#342468',
+          background: '#070512',
+          edgeLabelBackground: '#0e0b24',
+          clusterBkg: '#120d2c',
+          clusterBorder: '#6d28d9',
+          titleColor: '#e2d9f3',
+          nodeBorder: '#7c3aed',
+          mainBkg: '#1a1338',
+        },
+        flowchart: { curve: 'basis', htmlLabels: true, useMaxWidth: false },
+        securityLevel: 'loose',
+      });
+      mermaidInitialized = true;
+    }
+  }, []);
 
-    const renderChart = async () => {
+  // Render diagram
+  useEffect(() => {
+    if (!mermaidCode) return;
+    setIsRendering(true);
+    setError(null);
+
+    const doRender = async () => {
       try {
-        setError(null);
-        const uniqueId = `mermaid-${Date.now()}`;
-        const { svg } = await mermaid.render(uniqueId, mermaidCode);
+        const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const { svg } = await mermaid.render(id, mermaidCode);
         setSvgHtml(svg);
+        // Reset scale on new diagram
+        setScale(0.85);
+        setPan({ x: 0, y: 0 });
       } catch (err: any) {
         console.error('Mermaid render error:', err);
-        setError('Failed to render diagram. Check Mermaid syntax.');
+        setError('Failed to render diagram. Check Mermaid source syntax.');
+      } finally {
+        setIsRendering(false);
       }
     };
+    doRender();
+  }, [mermaidCode]);
 
-    renderChart();
-  }, [mermaidCode, isDark]);
-
-  // Clickable node handler
+  // Attach interactive node click listeners and style clickable nodes
   useEffect(() => {
-    if (!containerRef.current || !onNodeClick) return;
-
+    if (!containerRef.current || !svgHtml || !onNodeClick) return;
     const nodes = containerRef.current.querySelectorAll('.node');
+    const handlers: Array<{ el: Element; fn: EventListener }> = [];
+
     nodes.forEach((node) => {
-      const clickHandler = (e: Event) => {
+      const fn: EventListener = (e) => {
         e.stopPropagation();
-        const id = node.id || '';
-        onNodeClick(id);
+        const rawId = node.id || (node as HTMLElement).dataset.id || '';
+        onNodeClick(rawId);
+
+        // Visual click feedback
+        node.classList.add('clicked-node');
+        setTimeout(() => node.classList.remove('clicked-node'), 400);
       };
-      node.addEventListener('click', clickHandler);
+      node.addEventListener('click', fn);
       (node as HTMLElement).style.cursor = 'pointer';
+      handlers.push({ el: node, fn });
     });
 
     return () => {
-      nodes.forEach((node) => {
-        node.replaceWith(node.cloneNode(true));
-      });
+      handlers.forEach(({ el, fn }) => el.removeEventListener('click', fn));
     };
   }, [svgHtml, onNodeClick]);
 
-  // Zoom handlers
-  const handleZoomIn = () => setScale((prev) => Math.min(prev + 0.15, 3.5));
-  const handleZoomOut = () => setScale((prev) => Math.max(prev - 0.15, 0.25));
-  const handleReset = () => {
-    setScale(1);
+  // Zoom controls
+  const handleZoomIn = () => setScale((p) => Math.min(p + 0.15, 4));
+  const handleZoomOut = () => setScale((p) => Math.max(p - 0.15, 0.2));
+  const handleFit = () => {
+    if (!containerRef.current || !svgWrapperRef.current) return;
+    const container = containerRef.current.getBoundingClientRect();
+    const svgEl = svgWrapperRef.current.querySelector('svg');
+    if (!svgEl) return;
+    const svgW = svgEl.scrollWidth || svgEl.getBoundingClientRect().width;
+    const svgH = svgEl.scrollHeight || svgEl.getBoundingClientRect().height;
+    const padding = 40;
+    const fitScale = Math.min(
+      (container.width - padding) / svgW,
+      (container.height - padding) / svgH,
+      1
+    );
+    setScale(Math.max(0.3, fitScale));
     setPan({ x: 0, y: 0 });
   };
 
-  // Wheel to zoom in / zoom out (Hover zoom)
+  // Wheel-to-zoom
   const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (!panMode) return;
     e.preventDefault();
-    e.stopPropagation();
+    const factor = e.deltaY < 0 ? 1.12 : 0.9;
+    setScale((p) => Math.min(Math.max(p * factor, 0.2), 4));
+  }, [panMode]);
 
-    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-    setScale((prev) => Math.min(Math.max(prev * zoomFactor, 0.25), 3.5));
-  }, []);
-
-  // Pan / Grab Handlers
+  // Mouse pan / drag
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Only drag with primary mouse button
-    if (e.button !== 0) return;
+    if (!panMode || e.button !== 0) return;
+    e.preventDefault();
     setIsDragging(true);
     setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
   };
-
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
-    setPan({
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y,
-    });
+    setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
   };
+  const handleMouseUp = () => setIsDragging(false);
 
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  // Toggle Fullscreen Mode
-  const toggleFullscreen = () => {
-    setIsFullscreen((prev) => !prev);
-  };
-
-  // Escape key to exit fullscreen
+  // Keyboard shortcut (F / Esc for fullscreen)
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isFullscreen) {
-        setIsFullscreen(false);
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) setIsFullscreen(false);
+      if (e.key === 'f' || e.key === 'F') {
+        const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+        if (activeTag !== 'input' && activeTag !== 'textarea') {
+          setIsFullscreen((p) => !p);
+        }
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', fn);
+    return () => window.removeEventListener('keydown', fn);
   }, [isFullscreen]);
 
-  const handleCopyCode = async () => {
+  // Copy Mermaid
+  const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(mermaidCode);
       setCopied(true);
@@ -160,197 +178,174 @@ export const MermaidViewer: React.FC<MermaidViewerProps> = ({
     } catch {}
   };
 
+  // Export SVG directly
   const handleExportSvg = () => {
     if (!svgHtml) return;
-    const blob = new Blob([svgHtml], { type: 'image/svg+xml;charset=utf-8' });
+    const blob = new Blob([svgHtml], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'codemap-architecture.svg';
-    link.click();
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'architecture-diagram.svg' });
+    a.click();
     URL.revokeObjectURL(url);
-  };
-
-  const handleExportPng = () => {
-    if (!containerRef.current) return;
-    const svgElement = containerRef.current.querySelector('svg');
-    if (!svgElement) return;
-
-    const svgString = new XMLSerializer().serializeToString(svgElement);
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-
-    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(svgBlob);
-
-    img.onload = () => {
-      canvas.width = img.width * 2;
-      canvas.height = img.height * 2;
-      if (ctx) {
-        ctx.fillStyle = '#070512';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const pngUrl = canvas.toDataURL('image/png');
-        const link = document.createElement('a');
-        link.href = pngUrl;
-        link.download = 'codemap-architecture.png';
-        link.click();
-      }
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
   };
 
   return (
     <div
-      className={`relative w-full rounded-xl border-2 border-black bg-[#070512] shadow-[4px_4px_0_#000] overflow-hidden flex flex-col transition-all ${
+      className={`relative w-full border-2 border-black overflow-hidden flex flex-col transition-all duration-300 ${
         isFullscreen
-          ? 'fixed inset-0 z-[100] w-screen h-screen rounded-none border-none p-4'
-          : 'min-h-[520px]'
+          ? 'fixed inset-0 z-[100] w-screen h-screen rounded-none border-none'
+          : 'rounded-xl min-h-[580px]'
       }`}
+      style={{ background: '#070512', boxShadow: '4px 4px 0 #000' }}
     >
-      {/* Floating Toolbar Controls */}
-      <div className="border-b-2 border-black p-3 flex flex-wrap items-center justify-between gap-3 bg-[#0c0920] z-20 shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
-        {/* Left: Zoom & Pan Indicator Controls */}
-        <div className="flex items-center gap-2">
-          {/* Zoom Buttons */}
-          <div className="flex items-center gap-1 p-1 rounded-md bg-[#161033] border border-black shadow-[1px_1px_0_#000]">
+      {/* Top Header / Mode Ribbon */}
+      <div
+        className="border-b-2 border-black px-3.5 py-2.5 flex items-center justify-between gap-3 z-20 shrink-0 bg-[#0e0a24]"
+      >
+        {/* Left: Mode toggles */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center bg-[#150f38] border border-[#302166] rounded-md overflow-hidden">
             <button
-              onClick={handleZoomIn}
-              title="Zoom In (or use Mouse Wheel)"
-              className="p-1.5 rounded hover:bg-purple-900/50 text-zinc-200 hover:text-white transition-colors cursor-pointer"
+              onClick={() => setPanMode(true)}
+              title="Pan / Navigation mode"
+              className={`p-1.5 sm:px-2.5 sm:py-1.5 text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                panMode ? 'bg-purple-600 text-white shadow-sm' : 'text-zinc-400 hover:text-white'
+              }`}
             >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-            <span className="text-xs font-mono font-bold px-2 text-purple-300 select-none">
-              {Math.round(scale * 100)}%
-            </span>
-            <button
-              onClick={handleZoomOut}
-              title="Zoom Out (or use Mouse Wheel)"
-              className="p-1.5 rounded hover:bg-purple-900/50 text-zinc-200 hover:text-white transition-colors cursor-pointer"
-            >
-              <ZoomOut className="w-4 h-4" />
+              <Hand className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Pan</span>
             </button>
             <button
-              onClick={handleReset}
-              title="Reset Zoom & Pan (Center)"
-              className="p-1.5 rounded hover:bg-purple-900/50 text-zinc-200 hover:text-white transition-colors cursor-pointer"
+              onClick={() => setPanMode(false)}
+              title="Select / Inspect mode"
+              className={`p-1.5 sm:px-2.5 sm:py-1.5 text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                !panMode ? 'bg-purple-600 text-white shadow-sm' : 'text-zinc-400 hover:text-white'
+              }`}
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <MousePointer className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Inspect</span>
             </button>
           </div>
 
-          {/* Grab / Pan Status Badge */}
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-black bg-[#161033] text-[11px] font-mono text-zinc-300 shadow-[1px_1px_0_#000]">
-            <Hand className="w-3.5 h-3.5 text-purple-400" />
-            <span>Click & Drag to Grab / Pan</span>
+          <div className="hidden sm:flex items-center text-[10px] font-mono text-zinc-500 pl-2">
+            <span>Scroll to zoom • Drag to pan</span>
           </div>
         </div>
 
-        {/* Right: Fullscreen & Export Controls */}
-        <div className="flex items-center gap-2">
-          {/* Full Screen Toggle Button */}
+        {/* Right: Quick actions */}
+        <div className="flex items-center gap-1.5">
           <button
-            onClick={toggleFullscreen}
-            title={isFullscreen ? 'Exit Full Screen (Esc)' : 'Enter Full Screen'}
-            className="neo-action-btn py-1.5 px-3 text-xs flex items-center gap-1.5 !text-white cursor-pointer"
+            onClick={handleCopy}
+            title="Copy Mermaid source"
+            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-md bg-[#150f38] border border-[#302166] text-xs font-bold text-zinc-300 hover:text-white transition-colors flex items-center gap-1"
           >
-            {isFullscreen ? (
-              <>
-                <Minimize2 className="w-4 h-4 text-purple-400" />
-                <span>Exit Fullscreen</span>
-              </>
-            ) : (
-              <>
-                <Maximize2 className="w-4 h-4 text-purple-400" />
-                <span>Full Screen</span>
-              </>
-            )}
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
           </button>
 
           <button
-            onClick={handleCopyCode}
-            className="neo-action-btn py-1.5 px-3 text-xs flex items-center gap-1.5 !text-white cursor-pointer"
+            onClick={() => setIsFullscreen((p) => !p)}
+            title="Toggle fullscreen (F)"
+            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-md bg-[#150f38] border border-[#302166] text-xs font-bold text-zinc-300 hover:text-white transition-colors flex items-center gap-1"
           >
-            {copied ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Copied!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5 text-zinc-300" />
-                <span>Copy Code</span>
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={handleExportSvg}
-            className="neo-action-btn py-1.5 px-3 text-xs flex items-center gap-1.5 !text-white cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5 text-zinc-300" />
-            <span>SVG</span>
-          </button>
-
-          <button
-            onClick={handleExportPng}
-            className="neo-action-btn-primary py-1.5 px-3 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>PNG</span>
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{isFullscreen ? 'Exit' : 'Full'}</span>
           </button>
         </div>
       </div>
 
-      {/* Interactive Diagram Canvas Viewport (Wheel zoom + Click & Drag Grab Pan) */}
+      {/* Main Canvas Viewport */}
       <div
-        ref={viewportRef}
-        onWheel={handleWheel}
+        ref={containerRef}
+        className={`flex-1 relative overflow-hidden select-none ${
+          panMode ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'
+        }`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        style={{
-          cursor: isDragging ? 'grabbing' : 'grab',
-        }}
-        className="relative flex-1 overflow-hidden p-8 flex items-center justify-center min-h-[440px] bg-[#070512] select-none"
+        onWheel={handleWheel}
       >
-        {error ? (
-          <div className="p-4 rounded-xl bg-red-500/10 border-2 border-black text-red-400 text-xs font-semibold flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
+        {/* Floating GitDiagram-Style PanZoom Toolbar */}
+        <div className="pointer-events-none absolute top-3.5 right-3.5 z-20 flex items-center gap-2">
+          <div className="pointer-events-auto flex items-center overflow-hidden rounded-full border border-black/30 bg-[#120d31]/90 shadow-[0_10px_30px_rgba(0,0,0,0.5)] ring-1 ring-white/10 backdrop-blur-md">
+            <button
+              type="button"
+              aria-label="Zoom out"
+              onClick={handleZoomOut}
+              className="flex h-9 w-9 items-center justify-center text-zinc-200 hover:bg-white/10 active:scale-95 transition-all"
+            >
+              <Minus size={15} />
+            </button>
+            <div className="min-w-14 border-x border-white/10 px-2.5 text-center text-[11px] font-mono font-bold tracking-wider text-purple-300">
+              {Math.round(scale * 100)}%
+            </div>
+            <button
+              type="button"
+              aria-label="Zoom in"
+              onClick={handleZoomIn}
+              className="flex h-9 w-9 items-center justify-center text-zinc-200 hover:bg-white/10 active:scale-95 transition-all"
+            >
+              <Plus size={15} />
+            </button>
           </div>
-        ) : (
+
+          <button
+            type="button"
+            onClick={handleFit}
+            className="pointer-events-auto inline-flex h-9 items-center gap-1.5 rounded-full border border-black/30 bg-[#120d31]/90 px-3 text-[11px] font-bold tracking-wider text-purple-200 uppercase shadow-[0_10px_30px_rgba(0,0,0,0.5)] ring-1 ring-white/10 backdrop-blur-md hover:bg-[#1a1442] active:scale-95 transition-all"
+          >
+            <ScanSearch size={14} />
+            Fit
+          </button>
+        </div>
+
+        {/* Loading Spinner */}
+        {isRendering && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#070512]/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs text-purple-300 font-mono tracking-wide">Compiling Mermaid vectors...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Error Notification */}
+        {error && !isRendering && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 p-6">
+            <div className="neo-card p-6 bg-[#1a0e1c] border-2 border-rose-500/60 max-w-md text-center space-y-3">
+              <AlertCircle className="w-8 h-8 text-rose-400 mx-auto" />
+              <p className="text-sm text-rose-200 font-bold">{error}</p>
+              <button
+                onClick={() => setSvgHtml('')}
+                className="px-3 py-1.5 rounded bg-rose-950 text-rose-300 text-xs font-bold border border-rose-800"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* SVG Container with Pan & Zoom Transform */}
+        {svgHtml && !error && (
           <div
-            ref={containerRef}
+            ref={svgWrapperRef}
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
               transformOrigin: 'center center',
-              transition: isDragging ? 'none' : 'transform 0.08s ease-out',
+              transition: isDragging ? 'none' : 'transform 70ms ease-out',
             }}
-            className="mermaid-container select-none will-change-transform"
+            className="absolute inset-0 flex items-center justify-center select-none"
             dangerouslySetInnerHTML={{ __html: svgHtml }}
           />
         )}
+      </div>
 
-        {/* Ambient Subtle Instructions HUD in bottom-left */}
-        <div className="absolute bottom-3 left-3 pointer-events-none flex items-center gap-3 text-[11px] font-mono text-zinc-400 bg-[#0c0920]/80 backdrop-blur-sm px-3 py-1.5 rounded-md border border-purple-900/40">
-          <span>Scroll wheel: Zoom</span>
-          <span>•</span>
-          <span>Click & drag: Pan</span>
-          <span>•</span>
-          <span>Click node: Inspect code</span>
+      {/* Fullscreen exit hint */}
+      {isFullscreen && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full border border-purple-500/40 bg-black/75 backdrop-blur text-xs text-purple-200 font-medium pointer-events-none shadow-xl">
+          Press <kbd className="font-mono bg-purple-900/60 px-1.5 py-0.5 rounded text-white border border-purple-500/40">F</kbd> or <kbd className="font-mono bg-purple-900/60 px-1.5 py-0.5 rounded text-white border border-purple-500/40">Esc</kbd> to exit fullscreen
         </div>
-      </div>
-
-      {/* Footer Banner */}
-      <div className="py-2 px-4 text-center text-xs font-medium bg-[#0c0920] border-t-2 border-black text-purple-300 flex items-center justify-center gap-2">
-        <MousePointer className="w-3.5 h-3.5 text-purple-400" />
-        <span>Click on any component node in the flowchart to inspect its exact source lines & dependencies on GitHub.</span>
-      </div>
+      )}
     </div>
   );
 };
