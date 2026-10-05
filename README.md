@@ -14,6 +14,7 @@
   <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-19.0-61dafb.svg?style=flat-square" alt="React 19" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.7-3178c6.svg?style=flat-square" alt="TypeScript" /></a>
   <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-6.0-646cff.svg?style=flat-square" alt="Vite" /></a>
+  <a href="https://openai.com/"><img src="https://img.shields.io/badge/OpenAI-GPT--4o_%26_TTS--1-10a37f.svg?style=flat-square" alt="OpenAI" /></a>
   <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Google_Gemini-Flash_AI-4285f4.svg?style=flat-square" alt="Google Gemini AI" /></a>
   <a href="https://mermaid.js.org/"><img src="https://img.shields.io/badge/Mermaid.js-11.4-ff3670.svg?style=flat-square" alt="Mermaid" /></a>
   <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind-Neo_Brutalist-38bdf8.svg?style=flat-square" alt="Tailwind CSS" /></a>
@@ -72,8 +73,9 @@ Developers spend over 60% of their time reading unfamiliar code, untangling subs
   - 5-stage synchronized walkthrough of the repository architecture.
   - Dynamic active-node highlighting with glowing live badges.
   - Multi-speed playback (`1x`, `1.25x`, `1.5x`, `2x`), scrubber, and play/pause controls.
-  - Built-in Web Audio API sound effects for stage transitions and chimes.
-  - **Gemini AI Script Button**: Generate live voiceover and storyboards with one click.
+  - **OpenAI TTS-1 Spoken Narration**: Natural human voice actors (`Alloy`, `Nova`, `Echo`, `Onyx`, `Shimmer`, `Fable`).
+  - **Zero-Cost Browser Speech**: Built-in Web Speech API voice synthesis when offline or credits are limited.
+  - **Dual AI Video Script Engines**: One-click script synthesis powered by **OpenAI GPT-4o** or **Google Gemini Flash**.
 - **Multi-Format Export Suite**:
   - **4x High-Res PNG**: Crystal-clear raster export with dark background and Gitometer watermark.
   - **Vector SVG**: Clean vector graphic with embedded stylesheets.
@@ -127,8 +129,8 @@ flowchart TD
 | **Language** | [TypeScript 5.7](https://www.typescriptlang.org/) |
 | **Styling** | [Tailwind CSS 3.4](https://tailwindcss.com/) with Neo-Brutalist Obsidian tokens |
 | **Diagram Engine** | [Mermaid.js 11.4](https://mermaid.js.org/) + DOMPurify SVG sanitization |
-| **AI Integration** | [Google Gemini Flash](https://ai.google.dev/) (`gemini-flash-lite-latest`, `gemini-3.5-flash-lite`) |
-| **Audio Engine** | Web Audio API (real-time synthesized UI foley and transition chimes) |
+| **AI Integration** | [OpenAI](https://openai.com/) (GPT-4o & TTS-1 Audio) + [Google Gemini Flash](https://ai.google.dev/) (`gemini-flash-lite-latest`, `gemini-3.5-flash-lite`) |
+| **Audio Engine** | OpenAI TTS-1 Speech Synthesis, Web Speech API Voiceover & Web Audio SFX |
 | **Icons & UI** | [Lucide React](https://lucide.dev/) + [Hugeicons](https://hugeicons.com/) |
 
 ---
@@ -150,6 +152,9 @@ npm install
 ### 3. Configure Environment Variables
 Create a `.env.local` file in the project root:
 ```env
+# OpenAI API Key for GPT-4o video script synthesis and TTS-1 voice narration
+VITE_OPENAI_API_KEY=your_openai_api_key_here
+
 # Google Gemini API Key for live AI architecture synthesis and video explainer generation
 VITE_GEMINI_API_KEY=your_gemini_api_key_here
 

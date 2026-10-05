@@ -44,6 +44,7 @@ import { SettingsModal } from './components/SettingsModal';
 import PatternWaves from './components/PatternWaves';
 
 export const App: React.FC = () => {
+  const defaultOpenAiKey = (import.meta as any).env?.VITE_OPENAI_API_KEY || '';
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const saved = localStorage.getItem('gitometer_settings');
@@ -52,12 +53,15 @@ export const App: React.FC = () => {
         if (!parsed.geminiKey) {
           parsed.geminiKey = DEFAULT_GEMINI_API_KEY;
         }
+        if (!parsed.openAiKey && defaultOpenAiKey) {
+          parsed.openAiKey = defaultOpenAiKey;
+        }
         return parsed;
       }
     } catch {}
     return {
       githubToken: '',
-      openAiKey: '',
+      openAiKey: defaultOpenAiKey,
       anthropicKey: '',
       geminiKey: DEFAULT_GEMINI_API_KEY,
       theme: 'dark',
@@ -390,6 +394,8 @@ export const App: React.FC = () => {
             isDark={isDark}
             onRegenerate={handleRegenerateCodemap}
             generationStatus={codemapGenStatus}
+            geminiKey={settings.geminiKey}
+            openAiKey={settings.openAiKey}
           />
         )}
 

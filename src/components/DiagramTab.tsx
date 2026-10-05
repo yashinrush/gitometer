@@ -264,6 +264,7 @@ export interface DiagramTabProps {
   onRegenerate?: () => void;
   generationStatus?: GenerationStatus;
   geminiKey?: string;
+  openAiKey?: string;
 }
 
 export const DiagramTab: React.FC<DiagramTabProps> = ({
@@ -273,6 +274,7 @@ export const DiagramTab: React.FC<DiagramTabProps> = ({
   onRegenerate,
   generationStatus,
   geminiKey,
+  openAiKey,
 }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showSourceCode, setShowSourceCode] = useState(false);
@@ -658,6 +660,7 @@ export const DiagramTab: React.FC<DiagramTabProps> = ({
         graph={graph}
         isDark={isDark}
         geminiKey={geminiKey}
+        openAiKey={openAiKey}
       />
     </div>
   );

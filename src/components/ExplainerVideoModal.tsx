@@ -2,10 +2,16 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play, Pause, RotateCcw, Volume2, VolumeX, Captions,
   Maximize2, Minimize2, X, Sparkles, Clapperboard, CheckCircle2,
-  ChevronRight, FastForward, Terminal, Bot, Cpu, ShieldCheck, GitCommit
+  ChevronRight, FastForward, Terminal, Bot, Cpu, ShieldCheck, GitCommit,
+  Mic, AlertCircle, Loader2, Volume1
 } from 'lucide-react';
 import type { RepoMetadata, ArchitectureGraph } from '../types';
 import { generateAiVideoScript } from '../services/geminiService';
+import {
+  generateOpenAiVideoScript,
+  generateOpenAiSpeech,
+  isOpenAiConfigured,
+} from '../services/openaiService';
 
 interface ExplainerVideoModalProps {
   isOpen: boolean;
@@ -14,6 +20,7 @@ interface ExplainerVideoModalProps {
   graph: ArchitectureGraph;
   isDark?: boolean;
   geminiKey?: string;
+  openAiKey?: string;
 }
 
 interface Scene {
@@ -28,6 +35,8 @@ interface Scene {
   toneColor: string;
 }
 
+type TtsVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+
 export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
   isOpen,
   onClose,
@@ -35,11 +44,14 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
   graph,
   isDark = true,
   geminiKey,
+  openAiKey,
 }) => {
-  const isRushClaw = metadata.fullName.toLowerCase().includes('rushclaw') || metadata.name.toLowerCase().includes('rushclaw');
+  const isRushClaw =
+    metadata.fullName.toLowerCase().includes('rushclaw') ||
+    metadata.name.toLowerCase().includes('rushclaw');
 
-  // Build repository-tailored 60-second scenes
-  const scenes: Scene[] = [
+  // Baseline repository-tailored 60-second scenes
+  const defaultScenes: Scene[] = [
     {
       id: 1,
       title: '1. Entrypoint',
@@ -128,108 +140,236 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
   ];
 
   const [customScenes, setCustomScenes] = useState<Scene[] | null>(null);
-  const [isAiScript, setIsAiScript] = useState(false);
-  const [isGeneratingAiScript, setIsGeneratingAiScript] = useState(false);
+  const [activeScriptEngine, setActiveScriptEngine] = useState<'openai' | 'gemini' | 'default'>('default');
+  const [isGeneratingScript, setIsGeneratingScript] = useState<string | null>(null);
 
-  const activeScenesList = customScenes && customScenes.length >= 5 ? customScenes : scenes;
+  // Audio voiceover states
+  const [voiceMode, setVoiceMode] = useState<'tts' | 'speech' | 'sfx' | 'mute'>('tts');
+  const [selectedVoice, setSelectedVoice] = useState<TtsVoice>('alloy');
+  const [isGeneratingTts, setIsGeneratingTts] = useState(false);
+  const [audioBlobMap, setAudioBlobMap] = useState<Record<number, string>>({});
+  const [quotaNotice, setQuotaNotice] = useState<string | null>(null);
 
-  const handleGenerateAiScript = async () => {
-    setIsGeneratingAiScript(true);
-    try {
-      const generated = await generateAiVideoScript(metadata, graph, metadata.description || '', geminiKey);
-      if (generated && generated.length >= 5) {
-        const icons = [
-          <Terminal className="w-3.5 h-3.5" key="1" />,
-          <Cpu className="w-3.5 h-3.5" key="2" />,
-          <Bot className="w-3.5 h-3.5" key="3" />,
-          <GitCommit className="w-3.5 h-3.5" key="4" />,
-          <ShieldCheck className="w-3.5 h-3.5" key="5" />,
-        ];
-        const colors = ['#3b82f6', '#f43f5e', '#f59e0b', '#10b981', '#8b5cf6'];
-        const mapped: Scene[] = generated.slice(0, 5).map((g: any, i: number) => ({
-          id: i + 1,
-          title: g.title || `${i + 1}. Stage`,
-          startSec: i * 12,
-          endSec: (i + 1) * 12,
-          icon: icons[i],
-          headline: g.headline || `Architectural Stage ${i + 1}`,
-          narration: g.narration || '',
-          highlightNodes: Array.isArray(g.highlightNodes) ? g.highlightNodes : [],
-          toneColor: g.toneColor || colors[i],
-        }));
-        setCustomScenes(mapped);
-        setIsAiScript(true);
-      }
-    } catch (err) {
-      console.warn('AI video script generation failed:', err);
-    } finally {
-      setIsGeneratingAiScript(false);
-    }
-  };
+  const activeScenesList = customScenes && customScenes.length >= 5 ? customScenes : defaultScenes;
 
-  const totalDuration = 60; // 60 seconds
+  // Video timeline states
+  const totalDuration = 60;
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [showCaptions, setShowCaptions] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
-  // Determine active scene
+  // Active scene calculation
   const activeSceneIndex = Math.min(
     activeScenesList.length - 1,
     Math.max(0, activeScenesList.findIndex((s) => currentTime >= s.startSec && currentTime < s.endSec))
   );
   const currentScene = activeScenesList[activeSceneIndex] || activeScenesList[0];
 
-  // Web Audio SFX generator (Subtle tech UI chimes and scene transitions)
-  const playSfx = useCallback((type: 'beep' | 'whoosh' | 'click') => {
-    if (!soundEnabled) return;
+  // Helper icons and colors
+  const stageIcons = [
+    <Terminal className="w-3.5 h-3.5" key="1" />,
+    <Cpu className="w-3.5 h-3.5" key="2" />,
+    <Bot className="w-3.5 h-3.5" key="3" />,
+    <GitCommit className="w-3.5 h-3.5" key="4" />,
+    <ShieldCheck className="w-3.5 h-3.5" key="5" />,
+  ];
+  const stageColors = ['#3b82f6', '#f43f5e', '#f59e0b', '#10b981', '#8b5cf6'];
+
+  /**
+   * 1. Generate Video Script with OpenAI GPT-4o
+   */
+  const handleGenerateOpenAiScript = async () => {
+    setIsGeneratingScript('openai');
+    setQuotaNotice(null);
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!audioCtxRef.current && AudioCtx) {
-        audioCtxRef.current = new AudioCtx();
+      const generated = await generateOpenAiVideoScript(
+        metadata,
+        graph,
+        metadata.description || '',
+        openAiKey
+      );
+      if (generated && generated.length >= 5) {
+        const mapped: Scene[] = generated.slice(0, 5).map((g: any, i: number) => ({
+          id: i + 1,
+          title: g.title || `${i + 1}. Stage`,
+          startSec: i * 12,
+          endSec: (i + 1) * 12,
+          icon: stageIcons[i],
+          headline: g.headline || `Architectural Stage ${i + 1}`,
+          narration: g.narration || '',
+          highlightNodes: Array.isArray(g.highlightNodes) ? g.highlightNodes : [],
+          toneColor: g.toneColor || stageColors[i],
+        }));
+        setCustomScenes(mapped);
+        setActiveScriptEngine('openai');
+        setAudioBlobMap({}); // Invalidate audio cache for new script
       }
-      const ctx = audioCtxRef.current;
-      if (!ctx || ctx.state === 'suspended') {
-        ctx?.resume();
+    } catch (err: any) {
+      console.warn('OpenAI video script generation failed:', err);
+      if (err.isQuotaExhausted || err.message?.includes('credits') || err.message?.includes('quota')) {
+        setQuotaNotice(
+          'OpenAI account credits exhausted (429). Falling back to Gemini Flash script synthesis & browser speech.'
+        );
+        // Automatically fallback to Gemini Flash
+        await handleGenerateGeminiScript();
       }
-      if (!ctx) return;
+    } finally {
+      setIsGeneratingScript(null);
+    }
+  };
 
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      const now = ctx.currentTime;
-      if (type === 'beep') {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(587.33, now); // D5
-        osc.frequency.exponentialRampToValueAtTime(880, now + 0.12); // A5
-        gain.gain.setValueAtTime(0.06, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-        osc.start(now);
-        osc.stop(now + 0.18);
-      } else if (type === 'whoosh') {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(220, now);
-        osc.frequency.exponentialRampToValueAtTime(440, now + 0.2);
-        gain.gain.setValueAtTime(0.04, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-        osc.start(now);
-        osc.stop(now + 0.25);
-      } else {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(800, now);
-        gain.gain.setValueAtTime(0.03, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
-        osc.start(now);
-        osc.stop(now + 0.05);
+  /**
+   * 2. Generate Video Script with Gemini Flash
+   */
+  const handleGenerateGeminiScript = async () => {
+    setIsGeneratingScript('gemini');
+    try {
+      const generated = await generateAiVideoScript(
+        metadata,
+        graph,
+        metadata.description || '',
+        geminiKey
+      );
+      if (generated && generated.length >= 5) {
+        const mapped: Scene[] = generated.slice(0, 5).map((g: any, i: number) => ({
+          id: i + 1,
+          title: g.title || `${i + 1}. Stage`,
+          startSec: i * 12,
+          endSec: (i + 1) * 12,
+          icon: stageIcons[i],
+          headline: g.headline || `Architectural Stage ${i + 1}`,
+          narration: g.narration || '',
+          highlightNodes: Array.isArray(g.highlightNodes) ? g.highlightNodes : [],
+          toneColor: g.toneColor || stageColors[i],
+        }));
+        setCustomScenes(mapped);
+        setActiveScriptEngine('gemini');
+        setAudioBlobMap({});
       }
-    } catch {}
-  }, [soundEnabled]);
+    } catch (err) {
+      console.warn('Gemini AI script generation failed:', err);
+    } finally {
+      setIsGeneratingScript(null);
+    }
+  };
+
+  /**
+   * 3. Synthesize and Play Audio for Current Scene
+   */
+  const playSceneNarration = useCallback(
+    async (scene: Scene) => {
+      if (!soundEnabled || voiceMode === 'mute') return;
+
+      // Stop any existing audio
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+        audioElementRef.current = null;
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+
+      // Voiceover Mode: Try OpenAI TTS, fallback to Web Speech Synthesis
+      if (voiceMode === 'tts') {
+        const cachedUrl = audioBlobMap[scene.id];
+        if (cachedUrl) {
+          const audio = new Audio(cachedUrl);
+          audio.playbackRate = playbackSpeed;
+          audioElementRef.current = audio;
+          audio.play().catch(() => {});
+          return;
+        }
+
+        // Generate TTS using OpenAI
+        try {
+          setIsGeneratingTts(true);
+          const audioUrl = await generateOpenAiSpeech(scene.narration, selectedVoice, openAiKey);
+          setAudioBlobMap((prev) => ({ ...prev, [scene.id]: audioUrl }));
+          const audio = new Audio(audioUrl);
+          audio.playbackRate = playbackSpeed;
+          audioElementRef.current = audio;
+          audio.play().catch(() => {});
+          return;
+        } catch (err: any) {
+          console.warn('OpenAI TTS failed, falling back to Web Speech:', err);
+          if (err.isQuotaExhausted || err.message?.includes('credits') || err.message?.includes('quota')) {
+            setQuotaNotice('OpenAI TTS quota exhausted. Using natural Web Speech voiceover.');
+          }
+          // Fall through to browser Speech Synthesis
+        } finally {
+          setIsGeneratingTts(false);
+        }
+      }
+
+      // Web Speech Synthesis (natural browser voice)
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(scene.narration);
+        utterance.rate = 1.05 * playbackSpeed;
+        utterance.pitch = 1.0;
+        window.speechSynthesis.speak(utterance);
+      }
+    },
+    [soundEnabled, voiceMode, audioBlobMap, playbackSpeed, selectedVoice, openAiKey]
+  );
+
+  /**
+   * Web Audio SFX generator (Subtle tech UI chimes & transitions)
+   */
+  const playSfx = useCallback(
+    (type: 'beep' | 'whoosh' | 'click') => {
+      if (!soundEnabled || voiceMode === 'mute') return;
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!audioCtxRef.current && AudioCtx) {
+          audioCtxRef.current = new AudioCtx();
+        }
+        const ctx = audioCtxRef.current;
+        if (!ctx || ctx.state === 'suspended') {
+          ctx?.resume();
+        }
+        if (!ctx) return;
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const now = ctx.currentTime;
+        if (type === 'beep') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(587.33, now);
+          osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+          gain.gain.setValueAtTime(0.06, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+          osc.start(now);
+          osc.stop(now + 0.18);
+        } else if (type === 'whoosh') {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.exponentialRampToValueAtTime(440, now + 0.2);
+          gain.gain.setValueAtTime(0.04, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+          osc.start(now);
+          osc.stop(now + 0.25);
+        } else {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(800, now);
+          gain.gain.setValueAtTime(0.03, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+          osc.start(now);
+          osc.stop(now + 0.05);
+        }
+      } catch {}
+    },
+    [soundEnabled, voiceMode]
+  );
 
   // Timer loop
   useEffect(() => {
@@ -249,14 +389,37 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
     return () => clearInterval(interval);
   }, [isOpen, isPlaying, playbackSpeed, totalDuration]);
 
-  // Trigger sound when scene changes
-  const lastSceneRef = useRef(activeSceneIndex);
+  // Synchronize audio on scene change
+  const lastSceneRef = useRef<number>(-1);
   useEffect(() => {
+    if (!isOpen) return;
     if (lastSceneRef.current !== activeSceneIndex) {
-      playSfx('whoosh');
       lastSceneRef.current = activeSceneIndex;
+      playSfx('whoosh');
+      if (isPlaying) {
+        playSceneNarration(currentScene);
+      }
     }
-  }, [activeSceneIndex, playSfx]);
+  }, [activeSceneIndex, isPlaying, currentScene, playSceneNarration, playSfx, isOpen]);
+
+  // Pause audio on modal close or pause
+  useEffect(() => {
+    if (!isPlaying) {
+      if (audioElementRef.current) audioElementRef.current.pause();
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    }
+  }, [isPlaying]);
+
+  useEffect(() => {
+    return () => {
+      if (audioElementRef.current) audioElementRef.current.pause();
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   // Keyboard navigation
   useEffect(() => {
@@ -307,30 +470,60 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
       <div
         ref={modalRef}
         className={`w-full max-w-4xl bg-[#0a071a] border-2 border-black rounded-xl overflow-hidden flex flex-col shadow-[8px_8px_0_#000] transition-all duration-300 ${
-          isFullscreen ? '!fixed !inset-0 !max-w-none !rounded-none z-[60]' : 'max-h-[90vh]'
+          isFullscreen ? '!fixed !inset-0 !max-w-none !rounded-none z-[60]' : 'max-h-[92vh]'
         }`}
       >
         {/* Top Header Bar */}
-        <div className="flex items-center justify-between px-4 py-3 border-b-2 border-black bg-[#100b2b]">
+        <div className="flex flex-wrap items-center justify-between px-4 py-3 border-b-2 border-black bg-[#100b2b] gap-2">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg border border-purple-500/40 bg-purple-500/20 flex items-center justify-center text-purple-300">
               <Clapperboard className="w-4 h-4" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-black text-white tracking-wide">60s Architecture Explainer</span>
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-purple-500 text-black">
                   Synced Video
                 </span>
-                <button
-                  onClick={handleGenerateAiScript}
-                  disabled={isGeneratingAiScript}
-                  className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-violet-600/40 hover:bg-violet-600 text-violet-200 border border-violet-500/50 flex items-center gap-1 transition-all"
-                  title="Generate live AI narration using Gemini Flash"
-                >
-                  <Sparkles className={`w-2.5 h-2.5 ${isGeneratingAiScript ? 'animate-spin' : ''}`} />
-                  {isGeneratingAiScript ? 'Synthesizing...' : isAiScript ? 'AI Script Active' : 'Gemini AI Script'}
-                </button>
+
+                {/* AI Script Synthesis Triggers */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handleGenerateOpenAiScript}
+                    disabled={Boolean(isGeneratingScript)}
+                    className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase flex items-center gap-1 transition-all border ${
+                      activeScriptEngine === 'openai'
+                        ? 'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.4)]'
+                        : 'bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border-emerald-500/40'
+                    }`}
+                    title="Generate script with OpenAI GPT-4o"
+                  >
+                    {isGeneratingScript === 'openai' ? (
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-2.5 h-2.5 text-emerald-300" />
+                    )}
+                    <span>{isGeneratingScript === 'openai' ? 'Synthesizing...' : activeScriptEngine === 'openai' ? 'OpenAI GPT-4o' : 'OpenAI Script'}</span>
+                  </button>
+
+                  <button
+                    onClick={handleGenerateGeminiScript}
+                    disabled={Boolean(isGeneratingScript)}
+                    className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase flex items-center gap-1 transition-all border ${
+                      activeScriptEngine === 'gemini'
+                        ? 'bg-violet-600 text-white border-violet-400 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
+                        : 'bg-violet-950/60 hover:bg-violet-900 text-violet-300 border-violet-500/40'
+                    }`}
+                    title="Generate script with Google Gemini Flash"
+                  >
+                    {isGeneratingScript === 'gemini' ? (
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-2.5 h-2.5 text-violet-300" />
+                    )}
+                    <span>{isGeneratingScript === 'gemini' ? 'Synthesizing...' : activeScriptEngine === 'gemini' ? 'Gemini Active' : 'Gemini Script'}</span>
+                  </button>
+                </div>
               </div>
               <p className="text-[11px] font-mono text-purple-300/80 truncate max-w-xs sm:max-w-md">
                 {metadata.fullName}
@@ -355,6 +548,22 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Quota Notification Banner */}
+        {quotaNotice && (
+          <div className="px-4 py-2 bg-amber-950/80 border-b border-amber-600/40 flex items-center justify-between text-xs text-amber-200">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>{quotaNotice}</span>
+            </div>
+            <button
+              onClick={() => setQuotaNotice(null)}
+              className="text-[10px] text-amber-300 hover:text-white underline ml-2"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Scene Navigation Pill Bar */}
         <div className="flex items-center gap-1.5 px-3 py-2 border-b border-black/60 bg-[#0e0a26] overflow-x-auto scrollbar-none">
@@ -386,12 +595,11 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
         </div>
 
         {/* Video Canvas Stage */}
-        <div className="flex-1 relative min-h-[320px] sm:min-h-[400px] bg-[#070512] overflow-hidden flex flex-col items-center justify-center p-4">
-          {/* Animated Background Mesh & Waves */}
+        <div className="flex-1 relative min-h-[300px] sm:min-h-[360px] bg-[#070512] overflow-hidden flex flex-col items-center justify-center p-4">
           <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(#8b5cf6_1px,transparent_1px)] [background-size:24px_24px] animate-pulse" />
 
           {/* Active Scene Card */}
-          <div className="relative z-10 w-full max-w-xl mx-auto neo-card p-6 bg-[#120d31]/90 backdrop-blur-md border-2 border-black space-y-4 shadow-[6px_6px_0_#000]">
+          <div className="relative z-10 w-full max-w-xl mx-auto neo-card p-6 bg-[#120d31]/95 backdrop-blur-md border-2 border-black space-y-4 shadow-[6px_6px_0_#000]">
             <div className="flex items-center justify-between">
               <span
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-black uppercase tracking-wider border border-black shadow-[2px_2px_0_#000]"
@@ -400,9 +608,17 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
                 {currentScene.icon}
                 {currentScene.title}
               </span>
-              <span className="text-xs font-mono font-bold text-zinc-400">
-                Stage {activeSceneIndex + 1} of 5
-              </span>
+              <div className="flex items-center gap-2">
+                {isGeneratingTts && (
+                  <span className="text-[10px] text-purple-300 font-mono flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    TTS Voicing...
+                  </span>
+                )}
+                <span className="text-xs font-mono font-bold text-zinc-400">
+                  Stage {activeSceneIndex + 1} of 5
+                </span>
+              </div>
             </div>
 
             <h3 className="text-lg sm:text-xl font-black text-white leading-tight">
@@ -462,7 +678,7 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
                 className="w-full h-2 bg-black rounded-lg appearance-none cursor-pointer accent-purple-500 focus:outline-none"
               />
               <div
-                className="absolute top-0 left-0 h-2 bg-gradient-to-r from-purple-500 to-sky-400 rounded-lg pointer-events-none"
+                className="absolute top-0 left-0 h-2 bg-gradient-to-r from-purple-500 via-sky-400 to-emerald-400 rounded-lg pointer-events-none"
                 style={{ width: `${(currentTime / totalDuration) * 100}%` }}
               />
             </div>
@@ -507,15 +723,87 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
               </button>
             </div>
 
-            {/* Right toggles */}
-            <div className="flex items-center gap-2">
+            {/* Audio Voiceover & SFX Controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Voice Mode Selector */}
+              <div className="flex items-center rounded-lg border border-black bg-[#1e1547] p-0.5 text-xs font-bold text-zinc-300">
+                <button
+                  onClick={() => {
+                    setVoiceMode('tts');
+                    setSoundEnabled(true);
+                    playSfx('click');
+                  }}
+                  className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 ${
+                    voiceMode === 'tts' && soundEnabled
+                      ? 'bg-purple-600 text-white shadow-[1px_1px_0_#000]'
+                      : 'hover:text-white'
+                  }`}
+                  title="OpenAI TTS-1 Spoken Narration"
+                >
+                  <Mic className="w-3 h-3" />
+                  <span className="hidden sm:inline">TTS Voice</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setVoiceMode('speech');
+                    setSoundEnabled(true);
+                    playSfx('click');
+                  }}
+                  className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 ${
+                    voiceMode === 'speech' && soundEnabled
+                      ? 'bg-sky-600 text-white shadow-[1px_1px_0_#000]'
+                      : 'hover:text-white'
+                  }`}
+                  title="Web Speech API Zero-Cost Browser Voice"
+                >
+                  <Volume1 className="w-3 h-3" />
+                  <span className="hidden sm:inline">Browser Voice</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setVoiceMode('sfx');
+                    setSoundEnabled(true);
+                    playSfx('click');
+                  }}
+                  className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 ${
+                    voiceMode === 'sfx' && soundEnabled
+                      ? 'bg-emerald-600 text-white shadow-[1px_1px_0_#000]'
+                      : 'hover:text-white'
+                  }`}
+                  title="Sound Effects Only (Chimes & Whooshes)"
+                >
+                  <Volume2 className="w-3 h-3" />
+                  <span className="hidden sm:inline">SFX</span>
+                </button>
+              </div>
+
+              {/* Voice Actor Dropdown (When in TTS mode) */}
+              {voiceMode === 'tts' && (
+                <select
+                  value={selectedVoice}
+                  onChange={(e) => {
+                    setSelectedVoice(e.target.value as TtsVoice);
+                    setAudioBlobMap({}); // Invalidate audio cache on voice change
+                  }}
+                  className="px-2 py-1 rounded-lg border border-black bg-[#1e1547] text-xs font-mono font-bold text-purple-200 focus:outline-none"
+                  title="Select OpenAI TTS Voice"
+                >
+                  <option value="alloy">Alloy (Neutral)</option>
+                  <option value="nova">Nova (Warm)</option>
+                  <option value="echo">Echo (Crisp)</option>
+                  <option value="onyx">Onyx (Deep)</option>
+                  <option value="shimmer">Shimmer (Clear)</option>
+                  <option value="fable">Fable (British)</option>
+                </select>
+              )}
+
               {/* Captions Toggle */}
               <button
                 onClick={() => {
                   setShowCaptions(!showCaptions);
                   playSfx('click');
                 }}
-                className={`p-2.5 rounded-lg border border-black text-xs font-bold flex items-center gap-1.5 transition-all ${
+                className={`p-2 rounded-lg border border-black text-xs font-bold flex items-center gap-1 transition-all ${
                   showCaptions ? 'bg-purple-900/60 text-white border-purple-400' : 'bg-[#1e1547] text-zinc-400'
                 }`}
                 title="Toggle Captions"
@@ -524,19 +812,18 @@ export const ExplainerVideoModal: React.FC<ExplainerVideoModalProps> = ({
                 <span className="hidden sm:inline">CC</span>
               </button>
 
-              {/* Sound SFX Toggle */}
+              {/* Master Mute Toggle */}
               <button
                 onClick={() => {
                   setSoundEnabled(!soundEnabled);
                   playSfx('click');
                 }}
-                className={`p-2.5 rounded-lg border border-black text-xs font-bold flex items-center gap-1.5 transition-all ${
+                className={`p-2 rounded-lg border border-black text-xs font-bold flex items-center gap-1 transition-all ${
                   soundEnabled ? 'bg-purple-900/60 text-white border-purple-400' : 'bg-[#1e1547] text-zinc-400'
                 }`}
-                title="Toggle Sound Effects"
+                title="Toggle All Audio"
               >
                 {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                <span className="hidden sm:inline">SFX</span>
               </button>
             </div>
           </div>
